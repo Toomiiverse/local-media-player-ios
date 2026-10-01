@@ -9,11 +9,11 @@ export KEYCHAIN_PATH="$RUNNER_TEMP/ios-player.keychain-db"
 export KEYCHAIN_PASSWORD="$(openssl rand -hex 32)"
 echo "::add-mask::$KEYCHAIN_PASSWORD"
 export SIGNING_DIR="$RUNNER_TEMP/ios-player-signing"
-mkdir -p "$SIGNING_DIR" "$HOME/.appstoreconnect/private_keys" "$HOME/Library/MobileDevice/Provisioning Profiles"
+mkdir -p "$SIGNING_DIR" "$HOME/.appstoreconnect/private_keys" "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
 cleanup() {
   security delete-keychain "$KEYCHAIN_PATH" 2>/dev/null || true
   rm -f "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
-  if [[ -n "${PROFILE_UUID:-}" ]]; then rm -f "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"; fi
+  if [[ -n "${PROFILE_UUID:-}" ]]; then rm -f "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/$PROFILE_UUID.mobileprovision"; fi
   rm -rf "$SIGNING_DIR"
 }
 trap cleanup EXIT
@@ -47,7 +47,7 @@ assert not p['Entitlements'].get('get-task-allow', False), 'Use a distribution p
 print(str(uuid.UUID(p['UUID'])).upper())
 PY
 )
-cp "$SIGNING_DIR/profile.mobileprovision" "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
+cp "$SIGNING_DIR/profile.mobileprovision" "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
 python3 prepare.py
 pod install
 xcodebuild -workspace LocalMediaPlayer.xcworkspace -scheme LocalMediaPlayer -configuration Release -destination 'generic/platform=iOS' -archivePath build/LocalMediaPlayer.xcarchive CURRENT_PROJECT_VERSION="${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}" archive > "$RUNNER_TEMP/ios-archive.log" 2>&1 || { tail -80 "$RUNNER_TEMP/ios-archive.log"; exit 1; }
