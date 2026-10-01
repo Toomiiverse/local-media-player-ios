@@ -108,6 +108,9 @@ struct LibraryView: View {
         NavigationStack {
             List {
                 Section {
+                    NavigationLink { PCConnectionView() } label: { Label("Connect to PC · Booru Feed", systemImage: "desktopcomputer") }
+                }
+                Section {
                     Button { picking = true } label: { Label("Choose folder or drive", systemImage: "folder.badge.plus") }
                     if let root = library.root, let folder = library.folder {
                         HStack {

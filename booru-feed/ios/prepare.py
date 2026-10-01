@@ -18,7 +18,7 @@ def prepare():
         objects[key] = dict(isa=isa, **values)
         return key
 
-    sources = [add(name, "PBXFileReference", lastKnownFileType="sourcecode.swift", path=name, sourceTree="<group>") for name in ("LocalMediaApp.swift", "MediaFiles.swift")]
+    sources = [add(name, "PBXFileReference", lastKnownFileType="sourcecode.swift", path=name, sourceTree="<group>") for name in ("LocalMediaApp.swift", "MediaFiles.swift", "PCConnection.swift")]
     assets = add("assets", "PBXFileReference", lastKnownFileType="folder.assetcatalog", path="Assets.xcassets", sourceTree="<group>")
     privacy = add("privacy", "PBXFileReference", lastKnownFileType="text.xml", path="PrivacyInfo.xcprivacy", sourceTree="<group>")
     license_file = add("license", "PBXFileReference", lastKnownFileType="text", path="VLC-LICENSE.txt", sourceTree="<group>")

@@ -29,6 +29,8 @@ jobs:
         run: |
           swiftc MediaFiles.swift MediaFilesCheck.swift -o "$RUNNER_TEMP/media-check"
           "$RUNNER_TEMP/media-check"
+          swiftc PCConnection.swift PCConnectionCheck.swift -o "$RUNNER_TEMP/pc-check"
+          "$RUNNER_TEMP/pc-check"
       - name: Build for iPhone simulator
         run: |
           set -o pipefail

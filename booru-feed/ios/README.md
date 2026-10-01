@@ -1,6 +1,8 @@
 # Local Media Player for iPhone
 
-A private, standalone iOS 17+ app for folders selected in Files, including attached drives. It does not connect to the desktop, Tailscale, booru sites or analytics services. Files are played in place; only the folder bookmark and shuffle preference are retained on the phone. File providers may download their own cloud files when opened.
+A private iOS 17+ app for folders selected in Files, including attached drives. Files are played in place. File providers may download their own cloud files when opened.
+
+**Connect to PC · Booru Feed** opens the existing mobile web app inside a native Safari browser. The PC address is remembered on the phone; HTTPS is required and credentials, query strings and fragments are rejected. Keep the PC app and its mobile access service running, and connect Tailscale on both devices. Pair using the code shown in the desktop mobile access settings when prompted. Web sessions and downloaded web content are managed by Safari; the native app does not read web credentials or copy board API keys. Close the browser to return to local playback. PC access requires the PC to be online; local playback remains available offline.
 
 Uses MobileVLCKit **3.7.4**, the stable VLC engine, for broad codec/container support including MKV, AVI, MP4, MOV, WebM and WMV. Actual decoding depends on the file and device; damaged files and DRM protection are not bypassed. Images use bounded still previews, including the first frame of GIFs. Playback has seek, pause, mute, speed, previous/next and automatic next video. Backgrounding pauses playback.
 
