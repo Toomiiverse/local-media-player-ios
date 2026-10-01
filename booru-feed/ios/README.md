@@ -24,6 +24,14 @@ Publishing requires these **repository secrets**, entered through GitHub Setting
 
 Set repository **variable** `IOS_BUNDLE_ID` to your registered app ID (suggested `com.toomiiverse.localmediaplayer`). Create a matching iOS app record in App Store Connect. Certificates can be requested using a CSR generated on Windows; a personal Mac is not required for the cloud build. If no distribution certificate exists, generate the private key/CSR locally and submit the CSR through Apple Developer Certificates, then combine the downloaded certificate and private key into the password-protected P12. Keep those files outside this repository.
 
+To encode an existing certificate or profile on Windows without printing its contents, replace the example path and run this in PowerShell, then paste directly into the matching GitHub secret:
+
+```powershell
+Set-Clipboard -Value ([Convert]::ToBase64String([IO.File]::ReadAllBytes('C:\path\distribution.p12')))
+```
+
+Repeat for the `.mobileprovision` file. `ASC_PRIVATE_KEY` uses the original `.p8` text, not Base64. Clear the clipboard afterward. Do not send these values through chat.
+
 Run Actions → Private iOS player → Run workflow, enabling **Upload signed build to private TestFlight**. The script validates the provisioning profile and archives/exports an internal-testing-only build, then validates and uploads it. Signing files are removed from the temporary runner on exit. Upload success is not installation: wait for Apple processing, then create an internal TestFlight group and add your own App Store Connect user and processed build. No public testing link or App Store release is created. TestFlight builds expire after 90 days.
 
 ## Local build on a Mac / relinking

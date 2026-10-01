@@ -33,6 +33,8 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild -workspace LocalMediaPlayer.xcworkspace -scheme LocalMediaPlayer -configuration Debug -destination 'generic/platform=iOS Simulator' -derivedDataPath build CODE_SIGNING_ALLOWED=NO build > "$RUNNER_TEMP/ios-build.log" 2>&1 || { tail -100 "$RUNNER_TEMP/ios-build.log"; exit 1; }
+      - name: Check VLC playback on simulated iPhone
+        run: bash check-simulator.sh
       - name: Sign and upload to TestFlight
         if: ${{ inputs.upload == true }}
         env:
@@ -45,9 +47,6 @@ jobs:
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
         run: bash publish.sh
-      - name: Check VLC playback on simulated iPhone
-        if: ${{ inputs.upload != true }}
-        run: bash check-simulator.sh
       - name: Build evidence
         if: always()
         uses: actions/upload-artifact@v4

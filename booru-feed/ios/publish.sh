@@ -4,6 +4,7 @@ umask 077
 for name in APPLE_TEAM_ID IOS_BUNDLE_ID IOS_CERTIFICATE_BASE64 IOS_CERTIFICATE_PASSWORD IOS_PROFILE_BASE64 ASC_KEY_ID ASC_ISSUER_ID ASC_PRIVATE_KEY; do
   if [[ -z "${!name:-}" ]]; then echo "Missing secure publishing setting: $name"; exit 1; fi
 done
+[[ "$ASC_KEY_ID" =~ ^[A-Za-z0-9]+$ ]] || { echo 'Invalid API key identifier'; exit 1; }
 export KEYCHAIN_PATH="$RUNNER_TEMP/ios-player.keychain-db"
 export KEYCHAIN_PASSWORD="$(openssl rand -hex 32)"
 echo "::add-mask::$KEYCHAIN_PASSWORD"
@@ -40,7 +41,7 @@ from pathlib import Path
 p = plistlib.loads((Path(os.environ['SIGNING_DIR']) / 'profile.plist').read_bytes())
 assert p['ExpirationDate'] > datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None), 'Expired profile'
 assert p['TeamIdentifier'][0] == os.environ['APPLE_TEAM_ID'], 'Profile team mismatch'
-assert p['Entitlements']['application-identifier'] == os.environ['APPLE_TEAM_ID'] + '.' + os.environ['IOS_BUNDLE_ID'], 'Profile app mismatch'
+assert p['Entitlements']['application-identifier'] == p['ApplicationIdentifierPrefix'][0] + '.' + os.environ['IOS_BUNDLE_ID'], 'Profile app mismatch'
 assert not p.get('ProvisionedDevices') and not p.get('ProvisionsAllDevices'), 'Use an App Store distribution profile'
 assert not p['Entitlements'].get('get-task-allow', False), 'Use a distribution profile'
 print(str(uuid.UUID(p['UUID'])).upper())

@@ -260,14 +260,14 @@ struct PlayerView: View {
                 if library.current?.kind == .video { VLCVideoSurface(surface: playback.surface) }
                 if let image = playback.image {
                     Image(uiImage: image).resizable().scaledToFit()
-                        .gesture(DragGesture().onEnded { value in
-                            if value.translation.height < -60 { move(1) }
-                            else if value.translation.height > 60 { move(-1) }
-                        })
                 }
                 if playback.busy { ProgressView().tint(.white).accessibilityLabel("Loading media") }
                 if !playback.error.isEmpty { Text(playback.error).foregroundStyle(.white).padding().multilineTextAlignment(.center) }
             }
+            .gesture(DragGesture().onEnded { value in
+                if value.translation.height < -60 { move(1) }
+                else if value.translation.height > 60 { move(-1) }
+            })
             if library.current?.kind == .video {
                 VStack {
                     Slider(value: $seekPosition, in: 0...1, onEditingChanged: { editing in
