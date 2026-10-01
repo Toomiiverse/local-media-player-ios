@@ -44,7 +44,8 @@ assert p['TeamIdentifier'][0] == os.environ['APPLE_TEAM_ID'], 'Profile team mism
 assert p['Entitlements']['application-identifier'] == p['ApplicationIdentifierPrefix'][0] + '.' + os.environ['IOS_BUNDLE_ID'], 'Profile app mismatch'
 assert not p.get('ProvisionedDevices') and not p.get('ProvisionsAllDevices'), 'Use an App Store distribution profile'
 assert not p['Entitlements'].get('get-task-allow', False), 'Use a distribution profile'
-print(str(uuid.UUID(p['UUID'])).upper())
+uuid.UUID(p['UUID'])
+print(p['UUID'])
 PY
 )
 cp "$SIGNING_DIR/profile.mobileprovision" "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
