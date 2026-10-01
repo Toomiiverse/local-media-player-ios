@@ -1,0 +1,56 @@
+name: Private iOS player
+on:
+  push:
+    paths: ['booru-feed/ios/**', '.github/workflows/ios-player.yml']
+  workflow_dispatch:
+    inputs:
+      upload:
+        description: Upload signed build to private TestFlight
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: booru-feed/ios
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare Xcode project
+        run: python3 prepare.py
+      - name: Install VLC
+        run: |
+          if ! command -v pod >/dev/null; then brew install cocoapods; fi
+          pod install
+      - name: Check folder access and shuffle
+        run: |
+          swiftc MediaFiles.swift MediaFilesCheck.swift -o "$RUNNER_TEMP/media-check"
+          "$RUNNER_TEMP/media-check"
+      - name: Build for iPhone simulator
+        run: |
+          set -o pipefail
+          xcodebuild -workspace LocalMediaPlayer.xcworkspace -scheme LocalMediaPlayer -configuration Debug -destination 'generic/platform=iOS Simulator' -derivedDataPath build CODE_SIGNING_ALLOWED=NO build > "$RUNNER_TEMP/ios-build.log" 2>&1 || { tail -100 "$RUNNER_TEMP/ios-build.log"; exit 1; }
+      - name: Sign and upload to TestFlight
+        if: ${{ inputs.upload == true }}
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          IOS_BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID }}
+          IOS_CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          IOS_PROFILE_BASE64: ${{ secrets.IOS_PROFILE_BASE64 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+        run: bash publish.sh
+      - name: Build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build-evidence
+          path: |
+            ${{ runner.temp }}/ios-build.log
+            booru-feed/ios/Podfile.lock
+          retention-days: 7

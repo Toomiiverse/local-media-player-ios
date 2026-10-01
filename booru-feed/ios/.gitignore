@@ -1,0 +1,13 @@
+LocalMediaPlayer.xcodeproj/
+Assets.xcassets/
+Info.plist
+PrivacyInfo.xcprivacy
+build/
+*.p12
+*.p8
+*.mobileprovision
+*.cer
+*.key
+*.csr
+Pods/
+LocalMediaPlayer.xcworkspace/
