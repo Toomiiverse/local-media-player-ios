@@ -27,6 +27,12 @@ final class Library: ObservableObject {
     var current: MediaFile? { queue.indices.contains(position) ? queue[position] : nil }
 
     init() {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--codec-check") {
+            choose(FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Fixtures"))
+            return
+        }
+        #endif
         guard let data = UserDefaults.standard.data(forKey: "selectedFolder") else { return }
         do {
             var stale = false
@@ -73,7 +79,12 @@ final class Library: ObservableObject {
                     self.queue = result.rows; self.position = 0; self.showingPlayer = !result.rows.isEmpty
                     self.message = result.rows.isEmpty ? "No images or videos in this folder." : "Shuffled \(result.rows.count) of \(result.total) files."
                     if result.skipped > 0 { self.message += " Some folders could not be read." }
-                } else { self.folder = url; self.rows = result.rows; self.visibleCount = 30 }
+                } else {
+                    self.folder = url; self.rows = result.rows; self.visibleCount = 30
+                    #if DEBUG
+                    if ProcessInfo.processInfo.arguments.contains("--codec-check"), let first = result.rows.first(where: \.playable) { self.open(first) }
+                    #endif
+                }
             } catch {
                 guard !Task.isCancelled, request == self.generation else { return }
                 self.error = "This folder is unavailable. Reconnect the drive or choose another folder."
@@ -136,7 +147,7 @@ struct LibraryView: View {
                 }
                 Section {
                     Text("Powered by VLC for broad video format support. Damaged or DRM-protected files may not play. Images are shown as still previews.").font(.footnote).foregroundStyle(.secondary)
-                    NavigationLink("VLC & open-source notices") { ScrollView { Text((try? String(contentsOf: Bundle.main.url(forResource: "VLC-LICENSE", withExtension: "txt")!, encoding: .utf8)) ?? "VLCKit — LGPL 2.1 or later. Source: https://code.videolan.org/videolan/VLCKit/-/tree/3.7.4").font(.footnote).padding() }.navigationTitle("Open-source notices") }
+                    NavigationLink("VLC & open-source notices") { ScrollView { Text(Bundle.main.url(forResource: "VLC-LICENSE", withExtension: "txt").flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? "VLCKit — LGPL 2.1 or later. Source: https://code.videolan.org/videolan/VLCKit/-/tree/3.7.4").font(.footnote).padding() }.navigationTitle("Open-source notices") }
                     if library.root != nil { Button("Forget this folder", role: .destructive) { library.forget() }.disabled(library.busy) }
                 }
             }
@@ -281,7 +292,14 @@ struct PlayerView: View {
             }.buttonStyle(.bordered).padding(.horizontal)
         }
         .padding(.vertical)
-        .task(id: library.current?.id) { if let row = library.current, let root = library.root { await playback.load(row, root: root) } }
+        .task(id: library.current?.id) {
+            if let row = library.current, let root = library.root {
+                await playback.load(row, root: root)
+                #if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("--codec-check") { await codecCheck(row) }
+                #endif
+            }
+        }
         .onChange(of: scenePhase) { _, phase in if phase != .active { playback.player.pause() } }
         .onChange(of: playback.ended) { _, _ in move(1) }
         .onChange(of: playback.progress) { _, value in if !scrubbing { seekPosition = value } }
@@ -292,4 +310,34 @@ struct PlayerView: View {
         guard library.queue.indices.contains(next) else { return }
         playback.stop(); library.position = next
     }
+
+    #if DEBUG
+    // Generated media only, enabled explicitly by the simulator cloud check.
+    private func codecCheck(_ row: MediaFile) async {
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        do {
+            for _ in 0..<100 {
+                if playback.player.hasVideoOut && playback.player.time.intValue > 400 { break }
+                try await Task.sleep(nanoseconds: 200_000_000)
+            }
+            guard playback.player.hasVideoOut, playback.player.time.intValue > 400 else { throw CocoaError(.fileReadCorruptFile) }
+            playback.player.position = 0.5
+            try await Task.sleep(nanoseconds: 800_000_000)
+            guard playback.player.position > 0.35 else { throw CocoaError(.fileReadUnknown) }
+            playback.player.pause()
+            try await Task.sleep(nanoseconds: 200_000_000)
+            guard !playback.player.isPlaying else { throw CocoaError(.fileReadUnknown) }
+            playback.toggleMute()
+            guard playback.player.audio?.isMuted == true else { throw CocoaError(.fileReadUnknown) }
+            playback.toggleMute()
+            let report = documents.appendingPathComponent("codec-results.txt")
+            let previous = (try? String(contentsOf: report, encoding: .utf8)) ?? ""
+            try (previous + "PASS \(row.name): VLC video output, seeking, pause, mute\n").write(to: report, atomically: true, encoding: .utf8)
+            if library.position + 1 < library.queue.count { move(1) }
+            else { try "PASS".write(to: documents.appendingPathComponent("codec-complete.txt"), atomically: true, encoding: .utf8) }
+        } catch {
+            try? "FAIL \(row.name): \(error)".write(to: documents.appendingPathComponent("codec-complete.txt"), atomically: true, encoding: .utf8)
+        }
+    }
+    #endif
 }

@@ -53,7 +53,9 @@ enum MediaFiles {
         guard let walker = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: Array(keys), options: [.skipsHiddenFiles, .skipsPackageDescendants], errorHandler: { _, _ in skipped += 1; return true }) else { throw CocoaError(.fileReadUnknown) }
         for case let url as URL in walker {
             try Task.checkCancellation()
-            guard let row = try? entry(url, root: root) else { walker.skipDescendants(); continue }
+            // FileManager never follows symbolic links. Calling skipDescendants on
+            // a rejected file can instead suppress the next real directory.
+            guard let row = try? entry(url, root: root) else { continue }
             if row.kind == .folder {
                 if !recursive || walker.level >= 64 { walker.skipDescendants() }
                 continue

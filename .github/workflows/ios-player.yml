@@ -45,6 +45,9 @@ jobs:
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
         run: bash publish.sh
+      - name: Check VLC playback on simulated iPhone
+        if: ${{ inputs.upload != true }}
+        run: bash check-simulator.sh
       - name: Build evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -52,5 +55,7 @@ jobs:
           name: ios-build-evidence
           path: |
             ${{ runner.temp }}/ios-build.log
+            ${{ runner.temp }}/codec-results.txt
+            ${{ runner.temp }}/ios-player.png
             booru-feed/ios/Podfile.lock
           retention-days: 7

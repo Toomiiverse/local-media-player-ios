@@ -33,7 +33,7 @@ def prepare():
         settings.update(CODE_SIGN_STYLE="Manual", DEVELOPMENT_TEAM=os.environ["APPLE_TEAM_ID"], PRODUCT_BUNDLE_IDENTIFIER=os.environ["IOS_BUNDLE_ID"], PROVISIONING_PROFILE_SPECIFIER=os.environ["PROFILE_UUID"], CODE_SIGN_IDENTITY="Apple Distribution")
     # CocoaPods embeds the prebuilt VLC framework using its generated script.
     settings["ENABLE_USER_SCRIPT_SANDBOXING"] = "NO"
-    target_configs = [add("target" + name, "XCBuildConfiguration", name=name, buildSettings=dict(settings, SWIFT_OPTIMIZATION_LEVEL="-Onone" if name == "Debug" else "-O", DEBUG_INFORMATION_FORMAT="dwarf" if name == "Debug" else "dwarf-with-dsym")) for name in ["Debug", "Release"]]
+    target_configs = [add("target" + name, "XCBuildConfiguration", name=name, buildSettings=dict(settings, SWIFT_ACTIVE_COMPILATION_CONDITIONS="DEBUG" if name == "Debug" else "", SWIFT_OPTIMIZATION_LEVEL="-Onone" if name == "Debug" else "-O", DEBUG_INFORMATION_FORMAT="dwarf" if name == "Debug" else "dwarf-with-dsym")) for name in ["Debug", "Release"]]
     project_configs = [add("project" + name, "XCBuildConfiguration", name=name, buildSettings=dict(CLANG_ENABLE_MODULES="YES", CLANG_ENABLE_OBJC_ARC="YES")) for name in ["Debug", "Release"]]
     target_list = add("targetList", "XCConfigurationList", buildConfigurations=target_configs, defaultConfigurationIsVisible=0, defaultConfigurationName="Release")
     project_list = add("projectList", "XCConfigurationList", buildConfigurations=project_configs, defaultConfigurationIsVisible=0, defaultConfigurationName="Release")
