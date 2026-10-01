@@ -22,6 +22,8 @@ struct MediaFilesCheck {
         assert(!rows.contains { $0.name == "escape" })
         let flat = try MediaFiles.shuffle(root, root: root, recursive: false)
         let recursive = try MediaFiles.shuffle(root, root: root, recursive: true)
+        print("Flat: \(flat.total) \(flat.rows.map(\.name)); recursive: \(recursive.total) \(recursive.rows.map(\.name))")
+        fflush(stdout)
         assert(flat.total == 3 && recursive.total == 4)
         for number in 0..<1100 { try Data().write(to: root.appendingPathComponent("item\(number).mp4")) }
         let large = try MediaFiles.shuffle(root, root: root, recursive: true)
