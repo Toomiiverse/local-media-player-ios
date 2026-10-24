@@ -92,6 +92,32 @@ final class Library: ObservableObject {
             if request == self.generation { self.busy = false }
         }
     }
+    func stars(of row: MediaFile) -> Int? {
+        let name = row.url.deletingLastPathComponent().lastPathComponent
+        guard name.count == 7, name.hasSuffix("-stars"), let value = Int(name.prefix(1)), (1...5).contains(value) else { return nil }
+        return value
+    }
+    func rate(_ stars: Int) {
+        guard let root, let row = current, row.kind != .folder, (1...5).contains(stars) else { return }
+        let folder = root.appendingPathComponent("\(stars)-stars", isDirectory: true)
+        if row.url.deletingLastPathComponent().standardizedFileURL == folder.standardizedFileURL { return }
+        let access = root.startAccessingSecurityScopedResource()
+        defer { if access { root.stopAccessingSecurityScopedResource() } }
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let base = row.url.deletingPathExtension().lastPathComponent, ext = row.url.pathExtension
+            var target = folder.appendingPathComponent(row.url.lastPathComponent)
+            var copy = 2
+            while FileManager.default.fileExists(atPath: target.path) {
+                target = folder.appendingPathComponent(ext.isEmpty ? "\(base) (\(copy))" : "\(base) (\(copy)).\(ext)"); copy += 1
+            }
+            try FileManager.default.moveItem(at: row.url, to: target)
+            let moved = MediaFile(url: target, kind: row.kind)
+            queue[position] = moved
+            if let index = rows.firstIndex(where: { $0.id == row.id }) { rows.remove(at: index) }
+            message = "Rated \(stars) star\(stars == 1 ? "" : "s") · moved to \(folder.lastPathComponent)."
+        } catch { self.error = "The file could not be moved. It may be in use or the drive is read-only." }
+    }
     func open(_ row: MediaFile) {
         if row.kind == .folder { browse(row.url); return }
         queue = rows.filter(\.playable)
@@ -223,7 +249,7 @@ final class Playback: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         Task { @MainActor [weak self] in
             guard let self, self.active else { return }
             self.playing = self.player.isPlaying
-            self.busy = self.player.state == .opening || self.player.state == .buffering
+            self.busy = !self.player.isPlaying && (self.player.state == .opening || self.player.state == .buffering)
             if self.player.state == .error { self.error = "VLC could not play this file. It may be damaged, protected or on a disconnected drive."; self.busy = false }
             if self.player.state == .ended { self.active = false; self.ended += 1 }
         }
@@ -231,6 +257,7 @@ final class Playback: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     nonisolated func mediaPlayerTimeChanged(_ notification: Notification) {
         Task { @MainActor [weak self] in
             guard let self, self.active else { return }
+            self.busy = false
             self.progress = max(0, min(1, self.player.position))
             self.elapsed = self.player.time.stringValue
         }
@@ -285,6 +312,14 @@ struct PlayerView: View {
                         Button { playback.toggleMute() } label: { Image(systemName: playback.muted ? "speaker.slash.fill" : "speaker.wave.2.fill") }.accessibilityLabel(playback.muted ? "Unmute" : "Mute")
                     }.buttonStyle(.bordered)
                 }.padding(.horizontal)
+            }
+            if let row = library.current {
+                HStack(spacing: 6) {
+                    ForEach(1...5, id: \.self) { value in
+                        Button { library.rate(value) } label: { Image(systemName: (library.stars(of: row) ?? 0) >= value ? "star.fill" : "star") }
+                            .accessibilityLabel("Rate \(value) star\(value == 1 ? "" : "s")")
+                    }
+                }.buttonStyle(.borderless).font(.title3).tint(.yellow)
             }
             HStack {
                 Button { move(-1) } label: { Label("Previous", systemImage: "chevron.up") }.disabled(library.position == 0)

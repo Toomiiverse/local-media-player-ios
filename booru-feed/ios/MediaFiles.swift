@@ -12,6 +12,7 @@ struct MediaFile: Identifiable, Sendable {
 enum MediaFiles {
     static let images = Set("jpg jpeg png gif webp avif bmp heic heif tiff tif".split(separator: " ").map(String.init))
     static let videos = Set("mp4 webm mkv mk3d avi mov m4v wmv asf flv f4v mpg mpeg mpe m2v mts m2ts ts vob ogv ogg 3gp 3g2 rm rmvb divx mxf nut dv hevc h264 h265".split(separator: " ").map(String.init))
+    static let archives: Set<String> = ["zip", "rar", "7z", "tar", "gz", "tgz", "bz2", "xz", "cbz", "cbr", "cb7", "zipx"]
     static let keys: Set<URLResourceKey> = [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey]
 
     static func contains(_ url: URL, in root: URL) -> Bool {
@@ -27,6 +28,8 @@ enum MediaFiles {
         if values.isDirectory == true { return MediaFile(url: url, kind: .folder) }
         guard values.isRegularFile == true else { return nil }
         let ext = url.pathExtension.lowercased()
+        // Archives are skipped so big folders read faster; they cannot be played here anyway.
+        if archives.contains(ext) { return nil }
         return MediaFile(url: url, kind: images.contains(ext) ? .image : videos.contains(ext) ? .video : .file)
     }
 
