@@ -111,12 +111,31 @@ final class Library: ObservableObject {
             while FileManager.default.fileExists(atPath: target.path) {
                 target = folder.appendingPathComponent(ext.isEmpty ? "\(base) (\(copy))" : "\(base) (\(copy)).\(ext)"); copy += 1
             }
-            try FileManager.default.moveItem(at: row.url, to: target)
+            var failure: Error?
+            NSFileCoordinator().coordinate(writingItemAt: row.url, options: .forMoving, writingItemAt: target, options: .forReplacing, error: nil) { from, to in
+                do { try FileManager.default.moveItem(at: from, to: to) } catch { failure = error }
+            }
+            if let failure { throw failure }
             let moved = MediaFile(url: target, kind: row.kind)
             queue[position] = moved
             if let index = rows.firstIndex(where: { $0.id == row.id }) { rows.remove(at: index) }
             message = "Rated \(stars) star\(stars == 1 ? "" : "s") · moved to \(folder.lastPathComponent)."
-        } catch { self.error = "The file could not be moved. It may be in use or the drive is read-only." }
+        } catch { self.error = "The file could not be moved: \(error.localizedDescription)" }
+    }
+    // Deleting is permanent: drives in Files have no Recently Deleted.
+    func delete() {
+        guard let root, let row = current, row.kind != .folder else { return }
+        let access = root.startAccessingSecurityScopedResource()
+        defer { if access { root.stopAccessingSecurityScopedResource() } }
+        var failure: Error?
+        NSFileCoordinator().coordinate(writingItemAt: row.url, options: .forDeleting, error: nil) { url in
+            do { try FileManager.default.removeItem(at: url) } catch { failure = error }
+        }
+        if let failure { self.error = "The file could not be deleted: \(failure.localizedDescription)"; return }
+        queue.remove(at: position)
+        if let index = rows.firstIndex(where: { $0.id == row.id }) { rows.remove(at: index) }
+        if queue.isEmpty { showingPlayer = false } else { position = min(position, queue.count - 1) }
+        message = "Deleted \(row.name)."
     }
     func open(_ row: MediaFile) {
         if row.kind == .folder { browse(row.url); return }
@@ -276,6 +295,7 @@ struct PlayerView: View {
     @ObservedObject var library: Library
     @StateObject private var playback = Playback()
     @State private var scrubbing = false
+    @State private var confirmingDelete = false
     @State private var seekPosition: Float = 0
     @Environment(\.scenePhase) private var scenePhase
     var body: some View {
@@ -316,10 +336,16 @@ struct PlayerView: View {
             if let row = library.current {
                 HStack(spacing: 6) {
                     ForEach(1...5, id: \.self) { value in
-                        Button { library.rate(value) } label: { Image(systemName: (library.stars(of: row) ?? 0) >= value ? "star.fill" : "star") }
+                        Button { playback.stop(); library.rate(value) } label: { Image(systemName: (library.stars(of: row) ?? 0) >= value ? "star.fill" : "star") }
                             .accessibilityLabel("Rate \(value) star\(value == 1 ? "" : "s")")
                     }
+                    Spacer().frame(width: 16)
+                    Button(role: .destructive) { confirmingDelete = true } label: { Image(systemName: "trash") }.accessibilityLabel("Delete file").tint(.red)
                 }.buttonStyle(.borderless).font(.title3).tint(.yellow)
+                .confirmationDialog("Delete \(row.name)?", isPresented: $confirmingDelete, titleVisibility: .visible) {
+                    Button("Delete permanently", role: .destructive) { playback.stop(); library.delete() }
+                } message: { Text("This removes the file from the drive. It cannot be undone.") }
+                if !library.error.isEmpty { Text(library.error).font(.footnote).foregroundStyle(.red).padding(.horizontal) }
             }
             HStack {
                 Button { move(-1) } label: { Label("Previous", systemImage: "chevron.up") }.disabled(library.position == 0)
