@@ -145,71 +145,158 @@ final class Library: ObservableObject {
     }
 }
 
+extension Color {
+    static let brand = Color(red: 0.89, green: 0.72, blue: 0.26)
+    static let ink = Color(red: 0.11, green: 0.11, blue: 0.11)
+    static let panel = Color(red: 0.19, green: 0.19, blue: 0.19)
+}
+
+// A round dark button with a yellow icon, dimmed when it cannot be used.
+struct RudderButton: View {
+    let icon: String, label: String, size: CGFloat, action: () -> Void
+    @Environment(\.isEnabled) private var enabled
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: icon).font(.system(size: size * 0.38, weight: .bold)).foregroundStyle(Color.brand)
+                .frame(width: size, height: size).background(Color.ink, in: Circle())
+        }.buttonStyle(.plain).opacity(enabled ? 1 : 0.35).accessibilityLabel(label)
+    }
+}
+
 struct LibraryView: View {
+    enum Page { case library, pc, settings }
     @StateObject private var library = Library()
     @State private var picking = false
+    @State private var page = Page.library
     @AppStorage("shuffleSubfolders") private var recursive = true
     var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    NavigationLink { PCConnectionView() } label: { Label("Connect to PC · Booru Feed", systemImage: "desktopcomputer") }
-                }
-                Section {
-                    Button { picking = true } label: { Label("Choose folder or drive", systemImage: "folder.badge.plus") }
-                    if let root = library.root, let folder = library.folder {
-                        HStack {
-                            Button { library.browse(folder.deletingLastPathComponent()) } label: { Label("Up", systemImage: "arrow.up") }.disabled(folder == root)
-                            Spacer()
-                            Button("Root") { library.browse(root) }
-                            Button { library.browse(folder) } label: { Image(systemName: "arrow.clockwise") }.accessibilityLabel("Refresh folder")
-                        }.buttonStyle(.borderless)
-                        Toggle("Include subfolders", isOn: $recursive)
-                        Button { library.shuffle(recursive: recursive) } label: { Label("Shuffle & play", systemImage: "shuffle") }
+        VStack(spacing: 0) {
+            NavigationStack {
+                Group {
+                    switch page {
+                    case .library: libraryPage
+                    case .pc: PCConnectionView()
+                    case .settings: settingsPage
                     }
-                }.disabled(library.busy)
-                if library.busy {
-                    Section { HStack { ProgressView(); Text("Reading folder…"); Spacer(); Button("Cancel") { library.cancel() } } }
                 }
-                if !library.error.isEmpty { Section { Text(library.error).foregroundStyle(.red).accessibilityAddTraits(.updatesFrequently) } }
-                if !library.message.isEmpty { Section { Text(library.message).foregroundStyle(.secondary) } }
-                if let folder = library.folder {
-                    Section(folder.lastPathComponent) {
-                        if library.rows.isEmpty && !library.busy { Text("This folder is empty.").foregroundStyle(.secondary) }
+                .toolbarBackground(Color.ink, for: .navigationBar)
+            }
+            tabBar
+        }
+        .background(Color.ink.ignoresSafeArea())
+        .preferredColorScheme(.dark)
+        .tint(Color.brand)
+        .fileImporter(isPresented: $picking, allowedContentTypes: [.folder]) { result in
+            switch result {
+            case .success(let url): library.choose(url); page = .library
+            case .failure(let error):
+                if (error as NSError).code != NSUserCancelledError { library.error = "The folder could not be opened. Please try again." }
+            }
+        }
+        .fullScreenCover(isPresented: $library.showingPlayer) { PlayerView(library: library) }
+    }
+
+    // Tab bar: yellow, with the folder picker as the raised centre button.
+    private var tabBar: some View {
+        HStack {
+            tabButton(.library, icon: "house.fill", label: "Library")
+            Spacer()
+            Button { page = .library; library.shuffle(recursive: recursive) } label: { tabLabel(icon: "shuffle", label: "Shuffle", selected: false) }
+                .disabled(library.folder == nil || library.busy).opacity(library.folder == nil ? 0.4 : 1)
+            Spacer()
+            RudderButton(icon: "plus", label: "Choose folder or drive", size: 56) { picking = true }.disabled(library.busy)
+            Spacer()
+            tabButton(.pc, icon: "desktopcomputer", label: "PC")
+            Spacer()
+            tabButton(.settings, icon: "gearshape.fill", label: "Settings")
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Color.ink)
+        .padding(.horizontal, 22).padding(.top, 10).padding(.bottom, 2)
+        .background(UnevenRoundedRectangle(topLeadingRadius: 24, topTrailingRadius: 24, style: .continuous).fill(Color.brand).ignoresSafeArea(edges: .bottom))
+    }
+    private func tabButton(_ target: Page, icon: String, label: String) -> some View {
+        Button { page = target } label: { tabLabel(icon: icon, label: label, selected: page == target) }
+            .accessibilityAddTraits(page == target ? .isSelected : [])
+    }
+    private func tabLabel(icon: String, label: String, selected: Bool) -> some View {
+        VStack(spacing: 3) {
+            Image(systemName: icon).font(.title3)
+            Text(label).font(.caption2.weight(.semibold))
+        }.opacity(selected ? 1 : 0.6).frame(minWidth: 44, minHeight: 44)
+    }
+
+    // Grid: folders and files as yellow tiles, two to a row.
+    private var libraryPage: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                if let root = library.root, let folder = library.folder {
+                    HStack(spacing: 10) {
+                        circle("arrow.up", "Up") { library.browse(folder.deletingLastPathComponent()) }.disabled(folder == root)
+                        circle("house", "Root") { library.browse(root) }
+                        circle("arrow.clockwise", "Refresh folder") { library.browse(folder) }
+                    }.disabled(library.busy)
+                }
+                if library.busy {
+                    HStack { ProgressView(); Text("Reading folder…"); Spacer(); Button("Cancel") { library.cancel() } }
+                        .padding().background(Color.panel, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                }
+                if !library.error.isEmpty { Text(library.error).foregroundStyle(.red).accessibilityAddTraits(.updatesFrequently) }
+                if !library.message.isEmpty { Text(library.message).foregroundStyle(.secondary) }
+                if library.folder != nil {
+                    if library.rows.isEmpty && !library.busy { Text("This folder is empty.").foregroundStyle(.secondary) }
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
                         ForEach(library.rows.prefix(library.visibleCount)) { row in
-                            Button { library.open(row) } label: {
-                                Label { Text(row.name).lineLimit(2).foregroundStyle(.primary) } icon: {
-                                    Image(systemName: row.kind == .folder ? "folder" : row.kind == .video ? "play.rectangle" : row.kind == .image ? "photo" : "doc")
-                                }.padding(.vertical, 5)
-                            }.disabled(library.busy || row.kind == .file)
+                            Button { library.open(row) } label: { tile(row) }.buttonStyle(.plain).disabled(library.busy || row.kind == .file)
                         }
-                        if library.visibleCount < library.rows.count {
-                            Button("Show more files") { library.visibleCount += 30 }
-                                .onAppear { library.visibleCount += 30 }
-                        }
+                    }
+                    if library.visibleCount < library.rows.count {
+                        Button("Show more files") { library.visibleCount += 30 }.frame(maxWidth: .infinity)
+                            .onAppear { library.visibleCount += 30 }
                     }
                 } else if !library.busy {
-                    Section {
-                        ContentUnavailableView("Your media, on your iPhone", systemImage: "play.rectangle", description: Text("Choose a folder in Files, including a connected external drive. Files stay where they are."))
-                    }
+                    ContentUnavailableView {
+                        Label("Your media, on your iPhone", systemImage: "play.rectangle")
+                    } description: {
+                        Text("Choose a folder in Files, including a connected external drive. Files stay where they are.")
+                    } actions: {
+                        Button("Choose folder") { picking = true }.buttonStyle(.borderedProminent).foregroundStyle(Color.ink)
+                    }.padding(.top, 60)
                 }
-                Section {
-                    Text("Powered by VLC for broad video format support. Damaged or DRM-protected files may not play. Images are shown as still previews.").font(.footnote).foregroundStyle(.secondary)
-                    NavigationLink("VLC & open-source notices") { ScrollView { Text(Bundle.main.url(forResource: "VLC-LICENSE", withExtension: "txt").flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? "VLCKit — LGPL 2.1 or later. Source: https://code.videolan.org/videolan/VLCKit/-/tree/3.7.4").font(.footnote).padding() }.navigationTitle("Open-source notices") }
-                    if library.root != nil { Button("Forget this folder", role: .destructive) { library.forget() }.disabled(library.busy) }
-                }
-            }
-            .navigationTitle("Local Media Player")
-            .tint(Color(red: 0.70, green: 0.29, blue: 0.48))
-            .fileImporter(isPresented: $picking, allowedContentTypes: [.folder]) { result in
-                switch result {
-                case .success(let url): library.choose(url)
-                case .failure(let error):
-                    if (error as NSError).code != NSUserCancelledError { library.error = "The folder could not be opened. Please try again." }
-                }
-            }
-            .fullScreenCover(isPresented: $library.showingPlayer) { PlayerView(library: library) }
+            }.padding(16)
         }
+        .background(Color.ink)
+        .navigationTitle(library.folder?.lastPathComponent ?? "Local Media")
+    }
+    private func circle(_ icon: String, _ label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) { Image(systemName: icon).font(.body.weight(.semibold)).frame(width: 44, height: 44).background(Color.panel, in: Circle()) }
+            .accessibilityLabel(label)
+    }
+    private func tile(_ row: MediaFile) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Image(systemName: row.kind == .folder ? "folder.fill" : row.kind == .video ? "play.rectangle.fill" : row.kind == .image ? "photo.fill" : "doc").font(.title2)
+            Spacer(minLength: 0)
+            Text(row.name).font(.footnote.weight(.semibold)).lineLimit(2).multilineTextAlignment(.leading)
+        }
+        .foregroundStyle(row.kind == .file ? Color.white.opacity(0.5) : Color.ink)
+        .padding(14).frame(maxWidth: .infinity, minHeight: 110, alignment: .topLeading)
+        .background(row.kind == .file ? Color.panel : Color.brand, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var settingsPage: some View {
+        List {
+            Section {
+                Button { picking = true } label: { Label("Choose folder or drive", systemImage: "folder.badge.plus") }
+                Toggle("Shuffle includes subfolders", isOn: $recursive)
+                if library.root != nil { Button("Forget this folder", role: .destructive) { library.forget(); page = .library }.disabled(library.busy) }
+            }
+            Section {
+                Text("Powered by VLC for broad video format support. Damaged or DRM-protected files may not play. Images are shown as still previews.").font(.footnote).foregroundStyle(.secondary)
+                NavigationLink("VLC & open-source notices") { ScrollView { Text(Bundle.main.url(forResource: "VLC-LICENSE", withExtension: "txt").flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? "VLCKit — LGPL 2.1 or later. Source: https://code.videolan.org/videolan/VLCKit/-/tree/3.7.4").font(.footnote).padding() }.navigationTitle("Open-source notices") }
+            }
+        }
+        .scrollContentBackground(.hidden).background(Color.ink)
+        .navigationTitle("Settings")
     }
 }
 
@@ -299,63 +386,76 @@ struct PlayerView: View {
     @State private var seekPosition: Float = 0
     @Environment(\.scenePhase) private var scenePhase
     var body: some View {
-        VStack(spacing: 12) {
-            HStack {
-                Text(library.current?.name ?? "Media").font(.headline).lineLimit(2)
+        VStack(spacing: 0) {
+            // Three dots: a yellow top bar with back and a menu for the less frequent actions.
+            HStack(spacing: 12) {
+                Button { library.showingPlayer = false } label: { Image(systemName: "arrow.left").font(.title3.weight(.semibold)).frame(width: 44, height: 44) }.accessibilityLabel("Close player")
+                Text(library.current?.name ?? "Media").font(.headline).lineLimit(1)
                 Spacer()
-                Button { library.showingPlayer = false } label: { Image(systemName: "xmark.circle.fill").font(.title) }.accessibilityLabel("Close player")
-            }.padding(.horizontal)
+                Menu {
+                    if library.current?.kind == .video {
+                        Menu("Speed") { ForEach([Float(0.5), 1, 1.5, 2], id: \.self) { rate in Button("\(rate.formatted())×") { playback.player.rate = rate } } }
+                        Button { playback.toggleMute() } label: { Label(playback.muted ? "Unmute" : "Mute", systemImage: playback.muted ? "speaker.wave.2.fill" : "speaker.slash.fill") }
+                    }
+                    if library.current != nil { Button(role: .destructive) { confirmingDelete = true } label: { Label("Delete file", systemImage: "trash") } }
+                } label: { Image(systemName: "ellipsis").rotationEffect(.degrees(90)).font(.title3.weight(.semibold)).frame(width: 44, height: 44) }.accessibilityLabel("More")
+            }
+            .foregroundStyle(Color.ink).padding(.horizontal, 12)
+            .background(Color.brand.ignoresSafeArea(edges: .top))
             ZStack {
                 Color.black
                 if library.current?.kind == .video { VLCVideoSurface(surface: playback.surface) }
                 if let image = playback.image {
                     Image(uiImage: image).resizable().scaledToFit()
                 }
-                if playback.busy { ProgressView().tint(.white).accessibilityLabel("Loading media") }
+                if playback.busy { ProgressView().tint(Color.brand).accessibilityLabel("Loading media") }
                 if !playback.error.isEmpty { Text(playback.error).foregroundStyle(.white).padding().multilineTextAlignment(.center) }
             }
             .gesture(DragGesture().onEnded { value in
                 if value.translation.height < -60 { move(1) }
                 else if value.translation.height > 60 { move(-1) }
             })
-            if library.current?.kind == .video {
-                VStack {
+            // Sheet: the controls sit on a yellow panel, with rudder-style previous / play / next at the bottom.
+            VStack(spacing: 14) {
+                Capsule().fill(Color.ink.opacity(0.25)).frame(width: 36, height: 5)
+                if library.current?.kind == .video {
                     Slider(value: $seekPosition, in: 0...1, onEditingChanged: { editing in
                         scrubbing = editing
                         if !editing && playback.player.isSeekable { playback.player.position = seekPosition }
-                    }).accessibilityLabel("Playback position")
-                    HStack {
-                        Button { playback.toggle() } label: { Image(systemName: playback.playing ? "pause.fill" : "play.fill") }.accessibilityLabel(playback.playing ? "Pause" : "Play")
-                        Text(playback.elapsed).font(.caption).monospacedDigit()
-                        Spacer()
-                        Menu("Speed") { ForEach([Float(0.5), 1, 1.5, 2], id: \.self) { rate in Button("\(rate.formatted())×") { playback.player.rate = rate } } }
-                        Button { playback.toggleMute() } label: { Image(systemName: playback.muted ? "speaker.slash.fill" : "speaker.wave.2.fill") }.accessibilityLabel(playback.muted ? "Unmute" : "Mute")
-                    }.buttonStyle(.bordered)
-                }.padding(.horizontal)
-            }
-            if let row = library.current {
-                HStack(spacing: 6) {
-                    ForEach(1...5, id: \.self) { value in
-                        Button { playback.stop(); library.rate(value) } label: { Image(systemName: (library.stars(of: row) ?? 0) >= value ? "star.fill" : "star") }
-                            .accessibilityLabel("Rate \(value) star\(value == 1 ? "" : "s")")
+                    }).tint(Color.ink).accessibilityLabel("Playback position")
+                }
+                HStack {
+                    if library.current?.kind == .video { Text(playback.elapsed) }
+                    Spacer()
+                    Text("\(library.position + 1) / \(library.queue.count)")
+                }.font(.caption.weight(.semibold)).monospacedDigit()
+                if let row = library.current {
+                    HStack(spacing: 10) {
+                        ForEach(1...5, id: \.self) { value in
+                            Button { playback.stop(); library.rate(value) } label: { Image(systemName: (library.stars(of: row) ?? 0) >= value ? "star.fill" : "star").frame(width: 40, height: 40) }
+                                .accessibilityLabel("Rate \(value) star\(value == 1 ? "" : "s")")
+                        }
+                    }.font(.title3)
+                    if !library.error.isEmpty { Label(library.error, systemImage: "exclamationmark.triangle.fill").font(.footnote.weight(.semibold)) }
+                }
+                HStack(spacing: 28) {
+                    RudderButton(icon: "chevron.up", label: "Previous", size: 48) { move(-1) }.disabled(library.position == 0)
+                    if library.current?.kind == .video {
+                        RudderButton(icon: playback.playing ? "pause.fill" : "play.fill", label: playback.playing ? "Pause" : "Play", size: 64) { playback.toggle() }
                     }
-                    Spacer().frame(width: 16)
-                    Button(role: .destructive) { confirmingDelete = true } label: { Image(systemName: "trash") }.accessibilityLabel("Delete file").tint(.red)
-                }.buttonStyle(.borderless).font(.title3).tint(.yellow)
-                .confirmationDialog("Delete \(row.name)?", isPresented: $confirmingDelete, titleVisibility: .visible) {
-                    Button("Delete permanently", role: .destructive) { playback.stop(); library.delete() }
-                } message: { Text("This removes the file from the drive. It cannot be undone.") }
-                if !library.error.isEmpty { Text(library.error).font(.footnote).foregroundStyle(.red).padding(.horizontal) }
+                    RudderButton(icon: "chevron.down", label: "Next", size: 48) { move(1) }.disabled(library.position + 1 >= library.queue.count)
+                }
             }
-            HStack {
-                Button { move(-1) } label: { Label("Previous", systemImage: "chevron.up") }.disabled(library.position == 0)
-                Spacer()
-                Text("\(library.position + 1) / \(library.queue.count)").font(.caption).monospacedDigit()
-                Spacer()
-                Button { move(1) } label: { Label("Next", systemImage: "chevron.down") }.disabled(library.position + 1 >= library.queue.count)
-            }.buttonStyle(.bordered).padding(.horizontal)
+            .foregroundStyle(Color.ink)
+            .buttonStyle(.plain)
+            .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 10)
+            .background(UnevenRoundedRectangle(topLeadingRadius: 28, topTrailingRadius: 28, style: .continuous).fill(Color.brand).ignoresSafeArea(edges: .bottom))
         }
-        .padding(.vertical)
+        .background(Color.ink.ignoresSafeArea())
+        .preferredColorScheme(.dark)
+        .confirmationDialog("Delete \(library.current?.name ?? "this file")?", isPresented: $confirmingDelete, titleVisibility: .visible) {
+            Button("Delete permanently", role: .destructive) { playback.stop(); library.delete() }
+        } message: { Text("This removes the file from the drive. It cannot be undone.") }
         .task(id: library.current?.id) {
             if let row = library.current, let root = library.root {
                 await playback.load(row, root: root)
