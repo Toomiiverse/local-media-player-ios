@@ -146,12 +146,12 @@ final class Library: ObservableObject {
 }
 
 extension Color {
-    static let brand = Color(red: 0.89, green: 0.72, blue: 0.26)
-    static let ink = Color(red: 0.11, green: 0.11, blue: 0.11)
-    static let panel = Color(red: 0.19, green: 0.19, blue: 0.19)
+    static let brand = Color(red: 0.95, green: 0.67, blue: 0.78)
+    static let ink = Color(red: 0.13, green: 0.11, blue: 0.14)
+    static let panel = Color(red: 0.16, green: 0.13, blue: 0.18)
 }
 
-// A round dark button with a yellow icon, dimmed when it cannot be used.
+// A round dark button with a pink icon, dimmed when it cannot be used.
 struct RudderButton: View {
     let icon: String, label: String, size: CGFloat, action: () -> Void
     @Environment(\.isEnabled) private var enabled
@@ -196,7 +196,7 @@ struct LibraryView: View {
         .fullScreenCover(isPresented: $library.showingPlayer) { PlayerView(library: library) }
     }
 
-    // Tab bar: yellow, with the folder picker as the raised centre button.
+    // Tab bar: pink, with the folder picker as the raised centre button.
     private var tabBar: some View {
         HStack {
             tabButton(.library, icon: "house.fill", label: "Library")
@@ -226,7 +226,7 @@ struct LibraryView: View {
         }.opacity(selected ? 1 : 0.6).frame(minWidth: 44, minHeight: 44)
     }
 
-    // Grid: folders and files as yellow tiles, two to a row.
+    // Grid: folders and files as pink tiles, two to a row.
     private var libraryPage: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
@@ -387,7 +387,7 @@ struct PlayerView: View {
     @Environment(\.scenePhase) private var scenePhase
     var body: some View {
         VStack(spacing: 0) {
-            // Three dots: a yellow top bar with back and a menu for the less frequent actions.
+            // Three dots: a pink top bar with back and a menu for the less frequent actions.
             HStack(spacing: 12) {
                 Button { library.showingPlayer = false } label: { Image(systemName: "arrow.left").font(.title3.weight(.semibold)).frame(width: 44, height: 44) }.accessibilityLabel("Close player")
                 Text(library.current?.name ?? "Media").font(.headline).lineLimit(1)
@@ -415,7 +415,7 @@ struct PlayerView: View {
                 if value.translation.height < -60 { move(1) }
                 else if value.translation.height > 60 { move(-1) }
             })
-            // Sheet: the controls sit on a yellow panel, with rudder-style previous / play / next at the bottom.
+            // Sheet: the controls sit on a pink panel, with rudder-style previous / play / next at the bottom.
             VStack(spacing: 14) {
                 Capsule().fill(Color.ink.opacity(0.25)).frame(width: 36, height: 5)
                 if library.current?.kind == .video {

@@ -23,7 +23,7 @@ struct PCConnectionView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                // Sheet-style yellow card holding the address and the connect button.
+                // Sheet-style pink card holding the address and the connect button.
                 VStack(alignment: .leading, spacing: 12) {
                     Label("PC address", systemImage: "desktopcomputer").font(.headline)
                     TextField("https://your-pc.ts.net:8443/", text: $address)
