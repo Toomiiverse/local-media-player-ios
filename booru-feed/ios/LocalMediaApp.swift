@@ -153,12 +153,17 @@ extension Color {
 
 // A round dark button with a pink icon, dimmed when it cannot be used.
 struct RudderButton: View {
-    let icon: String, label: String, size: CGFloat, action: () -> Void
+    let icon: String, label: String, size: CGFloat
+    var tint: Color = Color.brand, caption: String? = nil
+    let action: () -> Void
     @Environment(\.isEnabled) private var enabled
     var body: some View {
         Button(action: action) {
-            Image(systemName: icon).font(.system(size: size * 0.38, weight: .bold)).foregroundStyle(Color.brand)
-                .frame(width: size, height: size).background(Color.ink, in: Circle())
+            VStack(spacing: 6) {
+                Image(systemName: icon).font(.system(size: size * 0.38, weight: .bold)).foregroundStyle(tint)
+                    .frame(width: size, height: size).background(Color.ink, in: Circle())
+                if let caption { Text(caption).font(.caption2.weight(.semibold)) }
+            }
         }.buttonStyle(.plain).opacity(enabled ? 1 : 0.35).accessibilityLabel(label)
     }
 }
@@ -384,11 +389,12 @@ struct PlayerView: View {
     @State private var scrubbing = false
     @State private var confirmingDelete = false
     @State private var seekPosition: Float = 0
+    @State private var fullscreen = false
     @Environment(\.scenePhase) private var scenePhase
     var body: some View {
         VStack(spacing: 0) {
             // Three dots: a pink top bar with back and a menu for the less frequent actions.
-            HStack(spacing: 12) {
+            if !fullscreen { HStack(spacing: 12) {
                 Button { library.showingPlayer = false } label: { Image(systemName: "arrow.left").font(.title3.weight(.semibold)).frame(width: 44, height: 44) }.accessibilityLabel("Close player")
                 Text(library.current?.name ?? "Media").font(.headline).lineLimit(1)
                 Spacer()
@@ -401,7 +407,7 @@ struct PlayerView: View {
                 } label: { Image(systemName: "ellipsis").rotationEffect(.degrees(90)).font(.title3.weight(.semibold)).frame(width: 44, height: 44) }.accessibilityLabel("More")
             }
             .foregroundStyle(Color.ink).padding(.horizontal, 12)
-            .background(Color.brand.ignoresSafeArea(edges: .top))
+            .background(Color.brand.ignoresSafeArea(edges: .top)) }
             ZStack {
                 Color.black
                 if library.current?.kind == .video { VLCVideoSurface(surface: playback.surface) }
@@ -410,13 +416,19 @@ struct PlayerView: View {
                 }
                 if playback.busy { ProgressView().tint(Color.brand).accessibilityLabel("Loading media") }
                 if !playback.error.isEmpty { Text(playback.error).foregroundStyle(.white).padding().multilineTextAlignment(.center) }
+                // Full screen: the media alone, edge to edge; one small button brings the controls back.
+                if fullscreen {
+                    VStack { HStack { Spacer(); Button { withAnimation { fullscreen = false } } label: { Image(systemName: "arrow.down.right.and.arrow.up.left").font(.title3.weight(.semibold)).foregroundStyle(Color.brand).frame(width: 44, height: 44).background(Color.ink.opacity(0.7), in: Circle()) }.accessibilityLabel("Exit full screen").padding() }; Spacer() }
+                }
             }
+            .ignoresSafeArea(edges: fullscreen ? .all : [])
+            .onTapGesture { if fullscreen, library.current?.kind == .video { playback.toggle() } }
             .gesture(DragGesture().onEnded { value in
                 if value.translation.height < -60 { move(1) }
                 else if value.translation.height > 60 { move(-1) }
             })
             // Sheet: the controls sit on a pink panel, with rudder-style previous / play / next at the bottom.
-            VStack(spacing: 14) {
+            if !fullscreen { VStack(spacing: 14) {
                 Capsule().fill(Color.ink.opacity(0.25)).frame(width: 36, height: 5)
                 if library.current?.kind == .video {
                     Slider(value: $seekPosition, in: 0...1, onEditingChanged: { editing in
@@ -438,19 +450,25 @@ struct PlayerView: View {
                     }.font(.title3)
                     if !library.error.isEmpty { Label(library.error, systemImage: "exclamationmark.triangle.fill").font(.footnote.weight(.semibold)) }
                 }
-                HStack(spacing: 28) {
-                    RudderButton(icon: "chevron.up", label: "Previous", size: 48) { move(-1) }.disabled(library.position == 0)
+                // Transport: labelled previous / play / next, with delete and full screen either side.
+                HStack(alignment: .top, spacing: 18) {
+                    RudderButton(icon: "trash.fill", label: "Delete file", size: 44, tint: Color(red: 1, green: 0.45, blue: 0.5), caption: "Delete") { confirmingDelete = true }.disabled(library.current == nil)
+                    Spacer(minLength: 0)
+                    RudderButton(icon: "backward.end.fill", label: "Previous", size: 52, caption: "Previous") { move(-1) }.disabled(library.position == 0)
                     if library.current?.kind == .video {
-                        RudderButton(icon: playback.playing ? "pause.fill" : "play.fill", label: playback.playing ? "Pause" : "Play", size: 64) { playback.toggle() }
+                        RudderButton(icon: playback.playing ? "pause.fill" : "play.fill", label: playback.playing ? "Pause" : "Play", size: 68, caption: playback.playing ? "Pause" : "Play") { playback.toggle() }
                     }
-                    RudderButton(icon: "chevron.down", label: "Next", size: 48) { move(1) }.disabled(library.position + 1 >= library.queue.count)
+                    RudderButton(icon: "forward.end.fill", label: "Next", size: 52, caption: "Next") { move(1) }.disabled(library.position + 1 >= library.queue.count)
+                    Spacer(minLength: 0)
+                    RudderButton(icon: "arrow.up.left.and.arrow.down.right", label: "Full screen", size: 44, caption: "Full") { withAnimation { fullscreen = true } }
                 }
             }
             .foregroundStyle(Color.ink)
             .buttonStyle(.plain)
             .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 10)
-            .background(UnevenRoundedRectangle(topLeadingRadius: 28, topTrailingRadius: 28, style: .continuous).fill(Color.brand).ignoresSafeArea(edges: .bottom))
+            .background(UnevenRoundedRectangle(topLeadingRadius: 28, topTrailingRadius: 28, style: .continuous).fill(Color.brand).ignoresSafeArea(edges: .bottom)) }
         }
+        .statusBarHidden(fullscreen)
         .background(Color.ink.ignoresSafeArea())
         .preferredColorScheme(.dark)
         .confirmationDialog("Delete \(library.current?.name ?? "this file")?", isPresented: $confirmingDelete, titleVisibility: .visible) {
