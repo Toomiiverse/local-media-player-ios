@@ -51,7 +51,7 @@ PY
 cp "$SIGNING_DIR/profile.mobileprovision" "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
 python3 prepare.py
 pod install
-xcodebuild -workspace LocalMediaPlayer.xcworkspace -scheme LocalMediaPlayer -configuration Release -destination 'generic/platform=iOS' -archivePath build/LocalMediaPlayer.xcarchive CURRENT_PROJECT_VERSION="${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}" archive > "$RUNNER_TEMP/ios-archive.log" 2>&1 || { tail -80 "$RUNNER_TEMP/ios-archive.log"; exit 1; }
+xcodebuild -workspace LocalMediaPlayer.xcworkspace -scheme LocalMediaPlayer -configuration Release -destination 'generic/platform=iOS' -archivePath build/LocalMediaPlayer.xcarchive CURRENT_PROJECT_VERSION="$((GITHUB_RUN_NUMBER + 400)).${GITHUB_RUN_ATTEMPT}" archive > "$RUNNER_TEMP/ios-archive.log" 2>&1 || { tail -80 "$RUNNER_TEMP/ios-archive.log"; exit 1; }
 python3 - <<'PY'
 import os, plistlib
 from pathlib import Path

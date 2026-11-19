@@ -6,11 +6,14 @@ import ImageIO
 
 @main
 struct LocalMediaApp: App {
-    var body: some Scene { WindowGroup { LibraryView() } }
+    var body: some Scene { WindowGroup { AppShell() } }
 }
 
 @MainActor
 final class Library: ObservableObject {
+    /// Every folder or drive chosen in Files, in the order they were added.
+    @Published var roots = [URL]()
+    /// The chosen folder being browsed and played from; its permission is the one held open.
     @Published var root: URL?
     @Published var folder: URL?
     @Published var rows = [MediaFile]()
@@ -21,7 +24,14 @@ final class Library: ObservableObject {
     @Published var message = ""
     @Published var error = ""
     @Published var showingPlayer = false
+    /// The folder picker is open (shown by the app shell, asked for from the Library and Settings pages).
+    @Published var picking = false
+    // A file the Feed tab downloaded for the player: it lives in temporary storage, outside the chosen folder.
+    @Published var tempPlayback = false
     private var scoped = false
+    /// Each chosen folder's saved permission, as Files handed it over.
+    private var bookmarks = [URL: Data]()
+    private static let foldersKey = "selectedFolders"
     private var job: Task<Void, Never>?
     private var generation = UUID()
     var current: MediaFile? { queue.indices.contains(position) ? queue[position] : nil }
@@ -33,32 +43,61 @@ final class Library: ObservableObject {
             return
         }
         #endif
-        guard let data = UserDefaults.standard.data(forKey: "selectedFolder") else { return }
-        do {
+        // The single folder older versions remembered is carried over as the first of the list.
+        var saved = UserDefaults.standard.array(forKey: Self.foldersKey) as? [Data] ?? []
+        if saved.isEmpty, let old = UserDefaults.standard.data(forKey: "selectedFolder") { saved = [old] }
+        for data in saved {
             var stale = false
-            let url = try URL(resolvingBookmarkData: data, options: [.withoutUI], relativeTo: nil, bookmarkDataIsStale: &stale)
-            choose(url)
-        } catch { self.error = "Reconnect your drive, then choose its folder again." }
+            guard let url = try? URL(resolvingBookmarkData: data, options: [.withoutUI], relativeTo: nil, bookmarkDataIsStale: &stale), !roots.contains(url) else { continue }
+            roots.append(url); bookmarks[url] = data
+        }
+        if roots.isEmpty { if !saved.isEmpty { self.error = "Reconnect your drive, then choose its folder again." }; return }
+        // One folder opens straight away; with several, the list of folders is the starting point.
+        if roots.count == 1 { activate(roots[0]) }
     }
 
     func cancel() { generation = UUID(); job?.cancel(); job = nil; busy = false }
-    func choose(_ url: URL) {
+    /// A folder picked in Files: remember it and open it.
+    func choose(_ url: URL) { add(url); activate(url) }
+    /// Several picked at once: remember them all, open the first.
+    func choose(_ urls: [URL]) {
+        for url in urls { add(url) }
+        if let first = urls.first { activate(first) }
+    }
+    private func add(_ url: URL) {
+        let access = url.startAccessingSecurityScopedResource()
+        defer { if access { url.stopAccessingSecurityScopedResource() } }
+        if let data = try? url.bookmarkData(options: [.minimalBookmark], includingResourceValuesForKeys: nil, relativeTo: nil) { bookmarks[url] = data }
+        if !roots.contains(url) { roots.append(url) }
+        save()
+    }
+    private func save() {
+        UserDefaults.standard.set(roots.compactMap { bookmarks[$0] }, forKey: Self.foldersKey)
+        UserDefaults.standard.removeObject(forKey: "selectedFolder")
+    }
+    /// Browse one of the chosen folders. Only the folder in use keeps its permission open.
+    func activate(_ url: URL) {
         cancel()
         if scoped { root?.stopAccessingSecurityScopedResource() }
         scoped = url.startAccessingSecurityScopedResource()
         root = url; queue = []; showingPlayer = false
-        do {
-            let data = try url.bookmarkData(options: [.minimalBookmark], includingResourceValuesForKeys: nil, relativeTo: nil)
-            UserDefaults.standard.set(data, forKey: "selectedFolder")
-        } catch { UserDefaults.standard.removeObject(forKey: "selectedFolder") }
         browse(url)
     }
-    func forget() {
-        cancel(); showingPlayer = false; queue = []; rows = []; folder = nil
-        if scoped { root?.stopAccessingSecurityScopedResource() }
-        root = nil; scoped = false; error = ""; message = ""
-        UserDefaults.standard.removeObject(forKey: "selectedFolder")
+    /// The top: the list of chosen folders when there are several, otherwise the top of the only one.
+    func home() {
+        guard roots.count > 1 else { if let root { browse(root) }; return }
+        cancel(); folder = nil; rows = []; error = ""; message = ""
     }
+    /// Stop remembering a folder. Its files are not touched.
+    func forget(_ url: URL) {
+        roots.removeAll { $0 == url }; bookmarks[url] = nil; save()
+        guard url == root else { return }
+        cancel(); showingPlayer = false; queue = []; rows = []; folder = nil
+        if scoped { url.stopAccessingSecurityScopedResource() }
+        root = nil; scoped = false; error = ""; message = ""
+        if roots.count == 1 { activate(roots[0]) }
+    }
+    func forget() { if let root { forget(root) } }
     func browse(_ url: URL) { load(url, shuffle: false, recursive: false) }
     func shuffle(recursive: Bool) { if let folder { load(folder, shuffle: true, recursive: recursive) } }
     private func load(_ url: URL, shuffle: Bool, recursive: Bool) {
@@ -76,7 +115,7 @@ final class Library: ObservableObject {
                 let result = try await withTaskCancellationHandler(operation: { try await worker.value }, onCancel: { worker.cancel() })
                 guard !Task.isCancelled, request == self.generation else { return }
                 if shuffle {
-                    self.queue = result.rows; self.position = 0; self.showingPlayer = !result.rows.isEmpty
+                    self.queue = result.rows; self.position = 0; self.tempPlayback = false; self.showingPlayer = !result.rows.isEmpty
                     self.message = result.rows.isEmpty ? "No images or videos in this folder." : "Shuffled \(result.rows.count) of \(result.total) files."
                     if result.skipped > 0 { self.message += " Some folders could not be read." }
                 } else {
@@ -137,8 +176,14 @@ final class Library: ObservableObject {
         if queue.isEmpty { showingPlayer = false } else { position = min(position, queue.count - 1) }
         message = "Deleted \(row.name)."
     }
+    func playDownloaded(_ url: URL) {
+        let ext = url.pathExtension.lowercased()
+        queue = [MediaFile(url: url, kind: MediaFiles.images.contains(ext) ? .image : .video)]
+        position = 0; tempPlayback = true; showingPlayer = true
+    }
     func open(_ row: MediaFile) {
         if row.kind == .folder { browse(row.url); return }
+        tempPlayback = false
         queue = rows.filter(\.playable)
         position = queue.firstIndex(where: { $0.id == row.id }) ?? 0
         showingPlayer = !queue.isEmpty
@@ -168,78 +213,21 @@ struct RudderButton: View {
     }
 }
 
-struct LibraryView: View {
-    enum Page { case library, pc, settings }
-    @StateObject private var library = Library()
-    @State private var picking = false
-    @State private var page = Page.library
+/// The phone's own folder (Saved → Boards → On this iPhone): folders and files as pink tiles, two to a row.
+struct LocalLibraryPage: View {
+    @EnvironmentObject var library: Library
     @AppStorage("shuffleSubfolders") private var recursive = true
     var body: some View {
-        VStack(spacing: 0) {
-            NavigationStack {
-                Group {
-                    switch page {
-                    case .library: libraryPage
-                    case .pc: PCConnectionView()
-                    case .settings: settingsPage
-                    }
-                }
-                .toolbarBackground(Color.ink, for: .navigationBar)
-            }
-            tabBar
-        }
-        .background(Color.ink.ignoresSafeArea())
-        .preferredColorScheme(.dark)
-        .tint(Color.brand)
-        .fileImporter(isPresented: $picking, allowedContentTypes: [.folder]) { result in
-            switch result {
-            case .success(let url): library.choose(url); page = .library
-            case .failure(let error):
-                if (error as NSError).code != NSUserCancelledError { library.error = "The folder could not be opened. Please try again." }
-            }
-        }
-        .fullScreenCover(isPresented: $library.showingPlayer) { PlayerView(library: library) }
-    }
-
-    // Tab bar: pink, with the folder picker as the raised centre button.
-    private var tabBar: some View {
-        HStack {
-            tabButton(.library, icon: "house.fill", label: "Library")
-            Spacer()
-            Button { page = .library; library.shuffle(recursive: recursive) } label: { tabLabel(icon: "shuffle", label: "Shuffle", selected: false) }
-                .disabled(library.folder == nil || library.busy).opacity(library.folder == nil ? 0.4 : 1)
-            Spacer()
-            RudderButton(icon: "plus", label: "Choose folder or drive", size: 56) { picking = true }.disabled(library.busy)
-            Spacer()
-            tabButton(.pc, icon: "desktopcomputer", label: "PC")
-            Spacer()
-            tabButton(.settings, icon: "gearshape.fill", label: "Settings")
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(Color.ink)
-        .padding(.horizontal, 22).padding(.top, 10).padding(.bottom, 2)
-        .background(UnevenRoundedRectangle(topLeadingRadius: 24, topTrailingRadius: 24, style: .continuous).fill(Color.brand).ignoresSafeArea(edges: .bottom))
-    }
-    private func tabButton(_ target: Page, icon: String, label: String) -> some View {
-        Button { page = target } label: { tabLabel(icon: icon, label: label, selected: page == target) }
-            .accessibilityAddTraits(page == target ? .isSelected : [])
-    }
-    private func tabLabel(icon: String, label: String, selected: Bool) -> some View {
-        VStack(spacing: 3) {
-            Image(systemName: icon).font(.title3)
-            Text(label).font(.caption2.weight(.semibold))
-        }.opacity(selected ? 1 : 0.6).frame(minWidth: 44, minHeight: 44)
-    }
-
-    // Grid: folders and files as pink tiles, two to a row.
-    private var libraryPage: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 if let root = library.root, let folder = library.folder {
                     HStack(spacing: 10) {
                         circle("arrow.up", "Up") { library.browse(folder.deletingLastPathComponent()) }.disabled(folder == root)
-                        circle("house", "Root") { library.browse(root) }
+                        circle(library.roots.count > 1 ? "square.grid.2x2" : "house", library.roots.count > 1 ? "All folders" : "Root") { library.home() }
                         circle("arrow.clockwise", "Refresh folder") { library.browse(folder) }
+                        Spacer()
+                        circle("shuffle", "Shuffle") { library.shuffle(recursive: recursive) }
+                        circle("folder.badge.plus", "Add folder or drive") { library.picking = true }
                     }.disabled(library.busy)
                 }
                 if library.busy {
@@ -259,23 +247,44 @@ struct LibraryView: View {
                         Button("Show more files") { library.visibleCount += 30 }.frame(maxWidth: .infinity)
                             .onAppear { library.visibleCount += 30 }
                     }
+                } else if !library.busy && !library.roots.isEmpty {
+                    // Several folders chosen: pick which one to open, or add another.
+                    Text("Your folders").font(.headline)
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                        ForEach(library.roots, id: \.self) { url in
+                            Button { library.activate(url) } label: { folderTile(url.lastPathComponent, icon: "folder.fill", filled: true) }.buttonStyle(.plain)
+                        }
+                        Button { library.picking = true } label: { folderTile("Add folder or drive", icon: "folder.badge.plus", filled: false) }.buttonStyle(.plain)
+                    }
                 } else if !library.busy {
                     ContentUnavailableView {
                         Label("Your media, on your iPhone", systemImage: "play.rectangle")
                     } description: {
-                        Text("Choose a folder in Files, including a connected external drive. Files stay where they are.")
+                        Text("Choose one or more folders in Files, including a connected external drive. Files stay where they are.")
                     } actions: {
-                        Button("Choose folder") { picking = true }.buttonStyle(.borderedProminent).foregroundStyle(Color.ink)
+                        Button("Choose folder") { library.picking = true }.buttonStyle(.borderedProminent).foregroundStyle(Color.ink)
                     }.padding(.top, 60)
                 }
             }.padding(16)
         }
-        .background(Color.ink)
-        .navigationTitle(library.folder?.lastPathComponent ?? "Local Media")
+        .background(Color.black)
+        .navigationTitle(library.folder?.lastPathComponent ?? "On this iPhone")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.visible, for: .navigationBar)
     }
     private func circle(_ icon: String, _ label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) { Image(systemName: icon).font(.body.weight(.semibold)).frame(width: 44, height: 44).background(Color.panel, in: Circle()) }
             .accessibilityLabel(label)
+    }
+    private func folderTile(_ name: String, icon: String, filled: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Image(systemName: icon).font(.title2)
+            Spacer(minLength: 0)
+            Text(name).font(.footnote.weight(.semibold)).lineLimit(2).multilineTextAlignment(.leading)
+        }
+        .foregroundStyle(filled ? Color.ink : Color.white)
+        .padding(14).frame(maxWidth: .infinity, minHeight: 110, alignment: .topLeading)
+        .background(filled ? Color.brand : Color.panel, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
     private func tile(_ row: MediaFile) -> some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -287,21 +296,47 @@ struct LibraryView: View {
         .padding(14).frame(maxWidth: .infinity, minHeight: 110, alignment: .topLeading)
         .background(row.kind == .file ? Color.panel : Color.brand, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
+}
 
-    private var settingsPage: some View {
+/// Settings (the gear on the Saved tab).
+struct SettingsPage: View {
+    @EnvironmentObject var library: Library
+    @EnvironmentObject var browser: FeedBrowser
+    @EnvironmentObject var hub: NativeHub
+    @EnvironmentObject var router: TabRouter
+    @AppStorage("shuffleSubfolders") private var recursive = true
+    var body: some View {
         List {
-            Section {
-                Button { picking = true } label: { Label("Choose folder or drive", systemImage: "folder.badge.plus") }
+            Section("Booru Feed on your PC") {
+                if let connected = browser.connected {
+                    LabeledContent("Connected to", value: connected.host ?? "PC")
+                    Button { router.go(.web) } label: { Label("Web version", systemImage: "globe") }
+                    Button(role: .destructive) { hub.stop(); browser.disconnect() } label: { Label("Disconnect from PC", systemImage: "wifi.slash") }
+                } else {
+                    Text("Not connected. Open Home to connect.").foregroundStyle(.secondary)
+                }
+            }
+            Section("On this iPhone") {
+                ForEach(library.roots, id: \.self) { url in
+                    HStack {
+                        Label(url.lastPathComponent, systemImage: "folder")
+                        Spacer()
+                        Button("Forget", role: .destructive) { library.forget(url) }.buttonStyle(.borderless).disabled(library.busy)
+                            .accessibilityLabel("Forget \(url.lastPathComponent)")
+                    }
+                }
+                Button { library.picking = true } label: { Label("Add folder or drive", systemImage: "folder.badge.plus") }
                 Toggle("Shuffle includes subfolders", isOn: $recursive)
-                if library.root != nil { Button("Forget this folder", role: .destructive) { library.forget(); page = .library }.disabled(library.busy) }
             }
             Section {
                 Text("Powered by VLC for broad video format support. Damaged or DRM-protected files may not play. Images are shown as still previews.").font(.footnote).foregroundStyle(.secondary)
                 NavigationLink("VLC & open-source notices") { ScrollView { Text(Bundle.main.url(forResource: "VLC-LICENSE", withExtension: "txt").flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? "VLCKit — LGPL 2.1 or later. Source: https://code.videolan.org/videolan/VLCKit/-/tree/3.7.4").font(.footnote).padding() }.navigationTitle("Open-source notices") }
             }
         }
-        .scrollContentBackground(.hidden).background(Color.ink)
+        .scrollContentBackground(.hidden).background(Color.black)
         .navigationTitle("Settings")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.visible, for: .navigationBar)
     }
 }
 
@@ -390,7 +425,12 @@ struct PlayerView: View {
     @State private var confirmingDelete = false
     @State private var seekPosition: Float = 0
     @State private var fullscreen = false
+    /// Full screen only: the controls over the media (a tap shows or hides them; they hide themselves after a moment).
+    @State private var chrome = true
+    /// Full screen only: the media fills the screen, cropping its edges, instead of fitting inside it (double tap).
+    @State private var zoomed = false
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.verticalSizeClass) private var verticalSize
     var body: some View {
         VStack(spacing: 0) {
             // Three dots: a pink top bar with back and a menu for the less frequent actions.
@@ -408,22 +448,28 @@ struct PlayerView: View {
             }
             .foregroundStyle(Color.ink).padding(.horizontal, 12)
             .background(Color.brand.ignoresSafeArea(edges: .top)) }
-            ZStack {
-                Color.black
-                if library.current?.kind == .video { VLCVideoSurface(surface: playback.surface) }
-                if let image = playback.image {
-                    Image(uiImage: image).resizable().scaledToFit()
+            GeometryReader { proxy in
+                ZStack {
+                    Color.black
+                    Group {
+                        if library.current?.kind == .video { VLCVideoSurface(surface: playback.surface) }
+                        if let image = playback.image {
+                            Image(uiImage: image).resizable().scaledToFit()
+                        }
+                    }.scaleEffect(fillScale(proxy.size))
+                    if playback.busy { ProgressView().tint(Color.brand).accessibilityLabel("Loading media") }
+                    if !playback.error.isEmpty { Text(playback.error).foregroundStyle(.white).padding().multilineTextAlignment(.center) }
+                    // Full screen: the media alone, edge to edge, under the status bar and the home indicator.
+                    // A tap shows the controls for a few seconds; a double tap fills the screen.
+                    if fullscreen && chrome { fullscreenControls }
                 }
-                if playback.busy { ProgressView().tint(Color.brand).accessibilityLabel("Loading media") }
-                if !playback.error.isEmpty { Text(playback.error).foregroundStyle(.white).padding().multilineTextAlignment(.center) }
-                // Full screen: the media alone, edge to edge; one small button brings the controls back.
-                if fullscreen {
-                    VStack { HStack { Spacer(); Button { withAnimation { fullscreen = false } } label: { Image(systemName: "arrow.down.right.and.arrow.up.left").font(.title3.weight(.semibold)).foregroundStyle(Color.brand).frame(width: 44, height: 44).background(Color.ink.opacity(0.7), in: Circle()) }.accessibilityLabel("Exit full screen").padding() }; Spacer() }
-                }
+                .frame(width: proxy.size.width, height: proxy.size.height).clipped()
             }
             .ignoresSafeArea(edges: fullscreen ? .all : [])
-            .onTapGesture { if fullscreen, library.current?.kind == .video { playback.toggle() } }
+            .onTapGesture(count: 2) { if fullscreen { withAnimation { zoomed.toggle() } } }
+            .onTapGesture { if fullscreen { withAnimation { chrome.toggle() } } }
             .gesture(DragGesture().onEnded { value in
+                if scrubbing { return }
                 if value.translation.height < -60 { move(1) }
                 else if value.translation.height > 60 { move(-1) }
             })
@@ -460,7 +506,7 @@ struct PlayerView: View {
                     }
                     RudderButton(icon: "forward.end.fill", label: "Next", size: 52, caption: "Next") { move(1) }.disabled(library.position + 1 >= library.queue.count)
                     Spacer(minLength: 0)
-                    RudderButton(icon: "arrow.up.left.and.arrow.down.right", label: "Full screen", size: 44, caption: "Full") { withAnimation { fullscreen = true } }
+                    RudderButton(icon: "arrow.up.left.and.arrow.down.right", label: "Full screen", size: 44, caption: "Full") { withAnimation { fullscreen = true; chrome = true } }
                 }
             }
             .foregroundStyle(Color.ink)
@@ -469,13 +515,22 @@ struct PlayerView: View {
             .background(UnevenRoundedRectangle(topLeadingRadius: 28, topTrailingRadius: 28, style: .continuous).fill(Color.brand).ignoresSafeArea(edges: .bottom)) }
         }
         .statusBarHidden(fullscreen)
+        .persistentSystemOverlays(fullscreen ? .hidden : .automatic)
         .background(Color.ink.ignoresSafeArea())
+        // Turning the phone sideways leaves no room for the control panel, so the media takes the whole screen.
+        .onAppear { if verticalSize == .compact { fullscreen = true } }
+        .onChange(of: verticalSize) { _, size in if size == .compact { withAnimation { fullscreen = true; chrome = true } } }
+        .task(id: "\(fullscreen) \(chrome) \(scrubbing)") {
+            guard fullscreen, chrome, !scrubbing else { return }
+            try? await Task.sleep(nanoseconds: 3_500_000_000)
+            if !Task.isCancelled { withAnimation { chrome = false } }
+        }
         .preferredColorScheme(.dark)
         .confirmationDialog("Delete \(library.current?.name ?? "this file")?", isPresented: $confirmingDelete, titleVisibility: .visible) {
             Button("Delete permanently", role: .destructive) { playback.stop(); library.delete() }
         } message: { Text("This removes the file from the drive. It cannot be undone.") }
         .task(id: library.current?.id) {
-            if let row = library.current, let root = library.root {
+            if let row = library.current, let root = library.tempPlayback ? FileManager.default.temporaryDirectory : library.root {
                 await playback.load(row, root: root)
                 #if DEBUG
                 if ProcessInfo.processInfo.arguments.contains("--codec-check") { await codecCheck(row) }
@@ -486,6 +541,36 @@ struct PlayerView: View {
         .onChange(of: playback.ended) { _, _ in move(1) }
         .onChange(of: playback.progress) { _, value in if !scrubbing { seekPosition = value } }
         .onDisappear { playback.stop(); try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
+    }
+    /// How much to enlarge fitted media so it covers the whole area (1 when not filling, or before its size is known).
+    private func fillScale(_ area: CGSize) -> CGFloat {
+        let media = library.current?.kind == .video ? playback.player.videoSize : (playback.image?.size ?? .zero)
+        guard fullscreen, zoomed, media.width > 0, media.height > 0, area.width > 0, area.height > 0 else { return 1 }
+        let across = area.width / media.width, down = area.height / media.height
+        return max(across, down) / min(across, down)
+    }
+    private var fullscreenControls: some View {
+        VStack {
+            HStack {
+                Spacer()
+                Button { withAnimation { fullscreen = false } } label: { Image(systemName: "arrow.down.right.and.arrow.up.left").font(.title3.weight(.semibold)).foregroundStyle(Color.brand).frame(width: 44, height: 44).background(Color.ink.opacity(0.7), in: Circle()) }
+                    .accessibilityLabel("Exit full screen").padding()
+            }
+            Spacer()
+            if library.current?.kind == .video {
+                HStack(spacing: 12) {
+                    Button { playback.toggle() } label: { Image(systemName: playback.playing ? "pause.fill" : "play.fill").font(.title3.weight(.semibold)).frame(width: 44, height: 44) }
+                        .accessibilityLabel(playback.playing ? "Pause" : "Play")
+                    Slider(value: $seekPosition, in: 0...1, onEditingChanged: { editing in
+                        scrubbing = editing
+                        if !editing && playback.player.isSeekable { playback.player.position = seekPosition }
+                    }).tint(Color.brand).accessibilityLabel("Playback position")
+                    Text(playback.elapsed).font(.caption.weight(.semibold)).monospacedDigit()
+                }
+                .foregroundStyle(.white).padding(.horizontal, 16).padding(.vertical, 6)
+                .background(Color.ink.opacity(0.7), in: Capsule()).padding(.horizontal, 16).padding(.bottom, 24)
+            }
+        }
     }
     private func move(_ delta: Int) {
         let next = library.position + delta

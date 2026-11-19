@@ -18,7 +18,7 @@ def prepare():
         objects[key] = dict(isa=isa, **values)
         return key
 
-    sources = [add(name, "PBXFileReference", lastKnownFileType="sourcecode.swift", path=name, sourceTree="<group>") for name in ("LocalMediaApp.swift", "MediaFiles.swift", "PCConnection.swift")]
+    sources = [add(name, "PBXFileReference", lastKnownFileType="sourcecode.swift", path=name, sourceTree="<group>") for name in ("LocalMediaApp.swift", "MediaFiles.swift", "PCConnection.swift", "NativeState.swift", "NativeLayout.swift", "NativeFeed.swift", "NativeScreens.swift", "NativeExtras.swift", "StreamProxy.swift", "PinUI.swift", "AppShell.swift")]
     assets = add("assets", "PBXFileReference", lastKnownFileType="folder.assetcatalog", path="Assets.xcassets", sourceTree="<group>")
     privacy = add("privacy", "PBXFileReference", lastKnownFileType="text.xml", path="PrivacyInfo.xcprivacy", sourceTree="<group>")
     license_file = add("license", "PBXFileReference", lastKnownFileType="text", path="VLC-LICENSE.txt", sourceTree="<group>")
@@ -63,7 +63,7 @@ def prepare():
 <ArchiveAction buildConfiguration="Release" revealArchiveInOrganizer="YES"/>
 </Scheme>''', encoding="utf-8")
     orientations = ["UIInterfaceOrientationPortrait", "UIInterfaceOrientationLandscapeLeft", "UIInterfaceOrientationLandscapeRight"]
-    info = dict(CFBundleDisplayName="Local Media Player", CFBundleName="$(PRODUCT_NAME)", CFBundleIdentifier="$(PRODUCT_BUNDLE_IDENTIFIER)", CFBundleExecutable="$(EXECUTABLE_NAME)", CFBundlePackageType="APPL", CFBundleShortVersionString="$(MARKETING_VERSION)", CFBundleVersion="$(CURRENT_PROJECT_VERSION)", LSRequiresIPhoneOS=True, UILaunchScreen={}, UISupportedInterfaceOrientations=orientations, ITSAppUsesNonExemptEncryption=False, UIApplicationSceneManifest=dict(UIApplicationSupportsMultipleScenes=False))
+    info = dict(NSAppTransportSecurity=dict(NSAllowsLocalNetworking=True), CFBundleDisplayName="Local Media Player", CFBundleName="$(PRODUCT_NAME)", CFBundleIdentifier="$(PRODUCT_BUNDLE_IDENTIFIER)", CFBundleExecutable="$(EXECUTABLE_NAME)", CFBundlePackageType="APPL", CFBundleShortVersionString="$(MARKETING_VERSION)", CFBundleVersion="$(CURRENT_PROJECT_VERSION)", LSRequiresIPhoneOS=True, UILaunchScreen={}, UISupportedInterfaceOrientations=orientations, ITSAppUsesNonExemptEncryption=False, UIApplicationSceneManifest=dict(UIApplicationSupportsMultipleScenes=False))
     info["UISupportedInterfaceOrientations~ipad"] = orientations + ["UIInterfaceOrientationPortraitUpsideDown"]
     (ROOT / "Info.plist").write_bytes(plistlib.dumps(info))
     (ROOT / "PrivacyInfo.xcprivacy").write_bytes(plistlib.dumps(dict(NSPrivacyTracking=False, NSPrivacyTrackingDomains=[], NSPrivacyCollectedDataTypes=[], NSPrivacyAccessedAPITypes=[dict(NSPrivacyAccessedAPIType="NSPrivacyAccessedAPICategoryUserDefaults", NSPrivacyAccessedAPITypeReasons=["CA92.1"])])))
