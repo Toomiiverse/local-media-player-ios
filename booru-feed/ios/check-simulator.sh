@@ -15,5 +15,6 @@ done
 cp "$CONTAINER/Documents/codec-results.txt" "$RUNNER_TEMP/codec-results.txt" || true
 xcrun simctl io "$DEVICE" screenshot "$RUNNER_TEMP/ios-player.png"
 cat "$RUNNER_TEMP/codec-results.txt" || true
+echo "Result: $(cat "$CONTAINER/Documents/codec-complete.txt" 2>/dev/null || echo "none after 120 s")"
 test "$(cat "$CONTAINER/Documents/codec-complete.txt")" = PASS
 test "$(grep -c '^PASS ' "$RUNNER_TEMP/codec-results.txt")" = 4
